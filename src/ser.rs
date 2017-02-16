@@ -2,7 +2,7 @@
 
 use byteorder::{LittleEndian, WriteBytesExt};
 use serde::ser::{self, Impossible};
-use super::error::{Error, ErrorKind, Result, ResultExt};
+use super::error::{Error, ErrorKind, Result};
 use std::io;
 
 /// A structure for serializing Rust values into ROSMSG binary data.
@@ -41,10 +41,10 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
     type SerializeSeq = Compound<'a, W>;
     type SerializeTuple = Compound<'a, W>;
     type SerializeTupleStruct = Compound<'a, W>;
-    type SerializeTupleVariant = Compound<'a, W>;
-    type SerializeMap = Compound<'a, W>;
+    type SerializeTupleVariant = Impossible<(), Error>;
+    type SerializeMap = Impossible<(), Error>;
     type SerializeStruct = Compound<'a, W>;
-    type SerializeStructVariant = Compound<'a, W>;
+    type SerializeStructVariant = Impossible<(), Error>;
 
     #[inline]
     fn serialize_bool(self, v: bool) -> SerializerResult {
@@ -102,7 +102,7 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
     }
 
     #[inline]
-    fn serialize_char(self, v: char) -> SerializerResult {
+    fn serialize_char(self, _v: char) -> SerializerResult {
         bail!(ErrorKind::UnsupportedCharType)
     }
 
@@ -124,7 +124,7 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
     }
 
     #[inline]
-    fn serialize_some<T: ?Sized + ser::Serialize>(self, value: &T) -> SerializerResult {
+    fn serialize_some<T: ?Sized + ser::Serialize>(self, _value: &T) -> SerializerResult {
         bail!(ErrorKind::UnsupportedEnumType)
     }
 
@@ -140,16 +140,16 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
 
     #[inline]
     fn serialize_unit_variant(self,
-                              name: &'static str,
-                              variant_index: usize,
-                              variant: &'static str)
+                              _name: &'static str,
+                              _variant_index: usize,
+                              _variant: &'static str)
                               -> SerializerResult {
         bail!(ErrorKind::UnsupportedEnumType)
     }
 
     #[inline]
     fn serialize_newtype_struct<T: ?Sized + ser::Serialize>(self,
-                                                            name: &'static str,
+                                                            _name: &'static str,
                                                             value: &T)
                                                             -> SerializerResult {
         value.serialize(self)
@@ -157,10 +157,10 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
 
     #[inline]
     fn serialize_newtype_variant<T: ?Sized + ser::Serialize>(self,
-                                                             name: &'static str,
-                                                             variant_index: usize,
-                                                             variant: &'static str,
-                                                             value: &T)
+                                                             _name: &'static str,
+                                                             _variant_index: usize,
+                                                             _variant: &'static str,
+                                                             _value: &T)
                                                              -> SerializerResult {
         bail!(ErrorKind::UnsupportedEnumType)
     }
@@ -174,12 +174,12 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
         };
 
         let mut v = Compound::new(self);
-        size.serialize(&mut Serializer::new(&mut v.buffer));
+        size.serialize(&mut Serializer::new(&mut v.buffer))?;
         Ok(v)
     }
 
     #[inline]
-    fn serialize_seq_fixed_size(self, size: usize) -> Result<Self::SerializeSeq> {
+    fn serialize_seq_fixed_size(self, _size: usize) -> Result<Self::SerializeSeq> {
         Ok(Compound::new(self))
     }
 
@@ -190,7 +190,7 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
 
     #[inline]
     fn serialize_tuple_struct(self,
-                              name: &'static str,
+                              _name: &'static str,
                               len: usize)
                               -> Result<Self::SerializeTupleStruct> {
         self.serialize_seq_fixed_size(len)
@@ -198,30 +198,30 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
 
     #[inline]
     fn serialize_tuple_variant(self,
-                               name: &'static str,
-                               variant_index: usize,
-                               variant: &'static str,
-                               len: usize)
+                               _name: &'static str,
+                               _variant_index: usize,
+                               _variant: &'static str,
+                               _len: usize)
                                -> Result<Self::SerializeTupleVariant> {
         bail!(ErrorKind::UnsupportedEnumType)
     }
 
     #[inline]
-    fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap> {
+    fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
         bail!(ErrorKind::UnsupportedMapType)
     }
 
     #[inline]
-    fn serialize_struct(self, name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
+    fn serialize_struct(self, _name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
         self.serialize_seq_fixed_size(len)
     }
 
     #[inline]
     fn serialize_struct_variant(self,
-                                name: &'static str,
-                                variant_index: usize,
-                                variant: &'static str,
-                                len: usize)
+                                _name: &'static str,
+                                _variant_index: usize,
+                                _variant: &'static str,
+                                _len: usize)
                                 -> Result<Self::SerializeStructVariant> {
         bail!(ErrorKind::UnsupportedEnumType)
     }
@@ -303,53 +303,6 @@ impl<'a, W> ser::SerializeTupleStruct for Compound<'a, W>
     }
 }
 
-impl<'a, W> ser::SerializeTupleVariant for Compound<'a, W>
-    where W: io::Write
-{
-    type Ok = ();
-    type Error = Error;
-
-    #[inline]
-    fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<()>
-        where T: ser::Serialize
-    {
-        value.serialize(&mut Serializer::new(&mut self.buffer))
-    }
-
-    #[inline]
-    fn end(self) -> Result<()> {
-        use serde::Serializer;
-        self.ser.serialize_bytes(&self.buffer)
-    }
-}
-
-impl<'a, W> ser::SerializeMap for Compound<'a, W>
-    where W: io::Write
-{
-    type Ok = ();
-    type Error = Error;
-
-    #[inline]
-    fn serialize_key<T: ?Sized>(&mut self, value: &T) -> Result<()>
-        where T: ser::Serialize
-    {
-        value.serialize(&mut Serializer::new(&mut self.buffer))
-    }
-
-    #[inline]
-    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<()>
-        where T: ser::Serialize
-    {
-        value.serialize(&mut Serializer::new(&mut self.buffer))
-    }
-
-    #[inline]
-    fn end(self) -> Result<()> {
-        use serde::Serializer;
-        self.ser.serialize_bytes(&self.buffer)
-    }
-}
-
 impl<'a, W> ser::SerializeStruct for Compound<'a, W>
     where W: io::Write
 {
@@ -357,27 +310,7 @@ impl<'a, W> ser::SerializeStruct for Compound<'a, W>
     type Error = Error;
 
     #[inline]
-    fn serialize_field<T: ?Sized>(&mut self, key: &'static str, value: &T) -> Result<()>
-        where T: ser::Serialize
-    {
-        value.serialize(&mut Serializer::new(&mut self.buffer))
-    }
-
-    #[inline]
-    fn end(self) -> Result<()> {
-        use serde::Serializer;
-        self.ser.serialize_bytes(&self.buffer)
-    }
-}
-
-impl<'a, W> ser::SerializeStructVariant for Compound<'a, W>
-    where W: io::Write
-{
-    type Ok = ();
-    type Error = Error;
-
-    #[inline]
-    fn serialize_field<T: ?Sized>(&mut self, key: &'static str, value: &T) -> Result<()>
+    fn serialize_field<T: ?Sized>(&mut self, _key: &'static str, value: &T) -> Result<()>
         where T: ser::Serialize
     {
         value.serialize(&mut Serializer::new(&mut self.buffer))

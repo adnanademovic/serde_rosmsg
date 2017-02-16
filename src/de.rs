@@ -48,7 +48,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     type Error = Error;
 
     #[inline]
-    fn deserialize<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize<V>(self, _visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
         bail!(ErrorKind::UnsupportedDeserializerMethod("deserialize".into()))
@@ -88,7 +88,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     impl_nums!(f64, deserialize_f64, visit_f64, read_f64);
 
     #[inline]
-    fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
         bail!(ErrorKind::UnsupportedCharType)
@@ -129,7 +129,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     }
 
     #[inline]
-    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_option<V>(self, _visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
         bail!(ErrorKind::UnsupportedEnumType)
@@ -143,14 +143,14 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     }
 
     #[inline]
-    fn deserialize_unit_struct<V>(self, name: &'static str, visitor: V) -> Result<V::Value>
+    fn deserialize_unit_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
         visitor.visit_unit()
     }
 
     #[inline]
-    fn deserialize_newtype_struct<V>(self, name: &'static str, visitor: V) -> Result<V::Value>
+    fn deserialize_newtype_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
         visitor.visit_newtype_struct(self)
@@ -182,7 +182,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     }
 
     #[inline]
-    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value>
+    fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
         let _size = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)?;
@@ -191,7 +191,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
 
     #[inline]
     fn deserialize_tuple_struct<V>(self,
-                                   name: &'static str,
+                                   _name: &'static str,
                                    len: usize,
                                    visitor: V)
                                    -> Result<V::Value>
@@ -201,7 +201,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     }
 
     #[inline]
-    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_map<V>(self, _visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
         bail!(ErrorKind::UnsupportedMapType)
@@ -209,7 +209,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
 
     #[inline]
     fn deserialize_struct<V>(self,
-                             name: &'static str,
+                             _name: &'static str,
                              fields: &'static [&'static str],
                              visitor: V)
                              -> Result<V::Value>
@@ -219,7 +219,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     }
 
     #[inline]
-    fn deserialize_struct_field<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_struct_field<V>(self, _visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
         bail!(ErrorKind::UnsupportedDeserializerMethod("deserialize_struct_field".into()))
@@ -227,9 +227,9 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
 
     #[inline]
     fn deserialize_enum<V>(self,
-                           name: &'static str,
-                           variants: &'static [&'static str],
-                           visitor: V)
+                           _name: &'static str,
+                           _variants: &'static [&'static str],
+                           _visitor: V)
                            -> Result<V::Value>
         where V: de::Visitor
     {
@@ -237,7 +237,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     }
 
     #[inline]
-    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_ignored_any<V>(self, _visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
         bail!(ErrorKind::UnsupportedDeserializerMethod("deserialize_ignored_any".into()))
