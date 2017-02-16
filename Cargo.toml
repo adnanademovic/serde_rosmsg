@@ -1,0 +1,15 @@
+[package]
+authors = ["Adnan Ademovic <adnanademovic100@gmail.com>"]
+categories = ["encoding"]
+description = "A TCPROS serialization file format"
+keywords = ["ros", "tcpros", "serde", "serialization"]
+license = "MIT"
+name = "serde_tcpros"
+readme = "README.md"
+repository = "https://github.com/adnanademovic/serde_tcpros"
+version = "0.0.0"
+
+[dependencies]
+byteorder = "1.0.0"
+error-chain = "0.9.0"
+serde = "0.9.7"
