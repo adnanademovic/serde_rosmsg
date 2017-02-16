@@ -25,6 +25,7 @@ impl<W> Serializer<W>
         self.writer
     }
 
+    #[inline]
     fn write_size(&mut self, len: usize) -> io::Result<()> {
         self.writer.write_u32::<LittleEndian>(len as u32)
     }
@@ -233,6 +234,7 @@ pub struct Compound<'a, W: 'a> {
 }
 
 impl<'a, W> Compound<'a, W> {
+    #[inline]
     fn new(ser: &'a mut Serializer<W>) -> Compound<'a, W> {
         Compound {
             ser: ser,
@@ -389,6 +391,7 @@ impl<'a, W> ser::SerializeStructVariant for Compound<'a, W>
 }
 
 impl ser::Error for Error {
+    #[inline]
     fn custom<T: ::std::fmt::Display>(msg: T) -> Self {
         format!("{}", msg).into()
     }
