@@ -42,7 +42,7 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
     type SerializeTuple = Compound<'a, W>;
     type SerializeTupleStruct = Compound<'a, W>;
     type SerializeTupleVariant = Impossible<(), Error>;
-    type SerializeMap = Impossible<(), Error>;
+    type SerializeMap = CompoundMap<'a, W>;
     type SerializeStruct = Compound<'a, W>;
     type SerializeStructVariant = Impossible<(), Error>;
 
@@ -208,7 +208,7 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
 
     #[inline]
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
-        bail!(ErrorKind::UnsupportedMapType)
+        Ok(CompoundMap::new(self))
     }
 
     #[inline]
@@ -320,6 +320,60 @@ impl<'a, W> ser::SerializeStruct for Compound<'a, W>
     fn end(self) -> Result<()> {
         use serde::Serializer;
         self.ser.serialize_bytes(&self.buffer)
+    }
+}
+
+#[doc(hidden)]
+pub struct CompoundMap<'a, W: 'a> {
+    ser: &'a mut Serializer<W>,
+    buffer: Serializer<Vec<u8>>,
+    item: Vec<u8>,
+}
+
+impl<'a, W> CompoundMap<'a, W> {
+    #[inline]
+    fn new(ser: &'a mut Serializer<W>) -> CompoundMap<'a, W> {
+        CompoundMap {
+            ser: ser,
+            buffer: Serializer::new(Vec::new()),
+            item: Vec::new(),
+        }
+    }
+}
+
+impl<'a, W> ser::SerializeMap for CompoundMap<'a, W>
+    where W: io::Write
+{
+    type Ok = ();
+    type Error = Error;
+
+    #[inline]
+    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<()>
+        where T: ser::Serialize
+    {
+        self.item = Vec::<u8>::new();
+        let mut buffer = Vec::<u8>::new();
+        key.serialize(&mut Serializer::new(&mut buffer))?;
+        self.item.extend(buffer.into_iter().skip(4));
+        self.item.push(b'=');
+        Ok(())
+    }
+
+    #[inline]
+    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<()>
+        where T: ser::Serialize
+    {
+        use serde::Serializer as SerializerTrait;
+        let mut buffer = Vec::<u8>::new();
+        value.serialize(&mut Serializer::new(&mut buffer))?;
+        self.item.extend(buffer.into_iter().skip(4));
+        self.buffer.serialize_bytes(&self.item)
+    }
+
+    #[inline]
+    fn end(self) -> Result<()> {
+        use serde::Serializer;
+        self.ser.serialize_bytes(&self.buffer.into_inner())
     }
 }
 
@@ -485,5 +539,31 @@ mod tests {
                         1, 10, 0, 0, 0, 5, 0, 0, 0, 49, 33, 33, 33, 33, 1, 9, 0, 0, 0, 4, 0, 0,
                         0, 50, 51, 52, 98, 0, 3, 0, 0, 0, 69, 69, 101],
                    pull_data(&v));
+    }
+
+    #[test]
+    fn writes_empty_string_string_map() {
+        let data = std::collections::HashMap::<String, String>::new();
+        assert_eq!(vec![0, 0, 0, 0], pull_data(&data));
+    }
+
+    #[test]
+    fn writes_single_item_string_string_map() {
+        let mut data = std::collections::HashMap::<String, String>::new();
+        data.insert(String::from("abc"), String::from("123"));
+        assert_eq!(vec![11, 0, 0, 0, 7, 0, 0, 0, 97, 98, 99, 61, 49, 50, 51],
+                   pull_data(&data));
+    }
+
+    #[test]
+    fn writes_multiple_item_string_string_map() {
+        let mut data = std::collections::HashMap::<String, String>::new();
+        data.insert(String::from("abc"), String::from("123"));
+        data.insert(String::from("AAA"), String::from("B0"));
+        let answer = pull_data(&data);
+        assert!(vec![21, 0, 0, 0, 7, 0, 0, 0, 97, 98, 99, 61, 49, 50, 51, 6, 0, 0, 0, 65,
+                     65, 65, 61, 66, 48] == answer ||
+                vec![21, 0, 0, 0, 6, 0, 0, 0, 65, 65, 65, 61, 66, 48, 7, 0, 0, 0, 97, 98, 99,
+                     61, 49, 50, 51] == answer);
     }
 }
