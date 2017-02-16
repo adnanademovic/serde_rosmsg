@@ -8,7 +8,9 @@ extern crate serde_derive;
 extern crate serde;
 
 pub use self::ser::Serializer;
+pub use self::de::Deserializer;
 pub use self::error::Error;
 
 mod ser;
+mod de;
 pub mod error;
