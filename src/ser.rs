@@ -1,4 +1,11 @@
 //! Serialize a Rust data structure into ROSMSG binary data.
+//!
+//! Data types supported by ROSMSG are supported as well. This results in the
+//! lack of support for:
+//!
+//! * Enums of any type, including `Option`
+//! * `char`, so use one character `String`s instead
+//! * Maps that can't be boiled down to `<String, String>`
 
 use byteorder::{LittleEndian, WriteBytesExt};
 use serde::ser::{self, Impossible};
@@ -33,6 +40,15 @@ impl<W> Serializer<W>
 
 type SerializerResult = Result<()>;
 
+macro_rules! impl_nums {
+    ($ty:ty, $ser_method:ident, $writer_method:ident) => {
+        #[inline]
+        fn $ser_method(self, v: $ty) -> SerializerResult {
+            self.writer.$writer_method::<LittleEndian>(v).map_err(|v| v.into())
+        }
+    }
+}
+
 impl<'a, W> ser::Serializer for &'a mut Serializer<W>
     where W: io::Write
 {
@@ -57,49 +73,19 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
     }
 
     #[inline]
-    fn serialize_i16(self, v: i16) -> SerializerResult {
-        self.writer.write_i16::<LittleEndian>(v).map_err(|v| v.into())
-    }
-
-    #[inline]
-    fn serialize_i32(self, v: i32) -> SerializerResult {
-        self.writer.write_i32::<LittleEndian>(v).map_err(|v| v.into())
-    }
-
-    #[inline]
-    fn serialize_i64(self, v: i64) -> SerializerResult {
-        self.writer.write_i64::<LittleEndian>(v).map_err(|v| v.into())
-    }
-
-    #[inline]
     fn serialize_u8(self, v: u8) -> SerializerResult {
         self.writer.write_u8(v).map_err(|v| v.into())
     }
 
-    #[inline]
-    fn serialize_u16(self, v: u16) -> SerializerResult {
-        self.writer.write_u16::<LittleEndian>(v).map_err(|v| v.into())
-    }
+    impl_nums!(u16, serialize_u16, write_u16);
+    impl_nums!(u32, serialize_u32, write_u32);
+    impl_nums!(u64, serialize_u64, write_u64);
+    impl_nums!(i16, serialize_i16, write_i16);
+    impl_nums!(i32, serialize_i32, write_i32);
+    impl_nums!(i64, serialize_i64, write_i64);
+    impl_nums!(f32, serialize_f32, write_f32);
+    impl_nums!(f64, serialize_f64, write_f64);
 
-    #[inline]
-    fn serialize_u32(self, v: u32) -> SerializerResult {
-        self.writer.write_u32::<LittleEndian>(v).map_err(|v| v.into())
-    }
-
-    #[inline]
-    fn serialize_u64(self, v: u64) -> SerializerResult {
-        self.writer.write_u64::<LittleEndian>(v).map_err(|v| v.into())
-    }
-
-    #[inline]
-    fn serialize_f32(self, v: f32) -> SerializerResult {
-        self.writer.write_f32::<LittleEndian>(v).map_err(|v| v.into())
-    }
-
-    #[inline]
-    fn serialize_f64(self, v: f64) -> SerializerResult {
-        self.writer.write_f64::<LittleEndian>(v).map_err(|v| v.into())
-    }
 
     #[inline]
     fn serialize_char(self, _v: char) -> SerializerResult {
@@ -384,101 +370,123 @@ impl ser::Error for Error {
     }
 }
 
+/// Serialize the given data structure `T` as ROSMSG into the IO stream.
+///
+/// Serialization can fail if `T`'s implementation of `Serialize` decides to
+/// fail. It can also fail if the structure contains unsupported elements.
+///
+/// Finally, it can also fail due to writer failure.
+#[inline]
+pub fn to_writer<W, T>(writer: &mut W, value: &T) -> Result<()>
+    where W: io::Write,
+          T: ser::Serialize
+{
+    value.serialize(&mut Serializer::new(writer))
+}
+
+/// Serialize the given data structure `T` as a ROSMSG byte vector.
+///
+/// Serialization can fail if `T`'s implementation of `Serialize` decides to
+/// fail. It can also fail if the structure contains unsupported elements.
+#[inline]
+pub fn to_vec<T>(value: &T) -> Result<Vec<u8>>
+    where T: ser::Serialize
+{
+    let mut writer = Vec::with_capacity(128);
+    to_writer(&mut writer, value)?;
+    Ok(writer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std;
-    use serde::Serialize;
-
-    fn pull_data<T: Serialize>(data: &T) -> Vec<u8> {
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        data.serialize(&mut Serializer::new(&mut cursor)).unwrap();
-        cursor.into_inner()
-    }
+    use std::collections::HashMap;
 
     #[test]
     fn writes_u8() {
-        assert_eq!(vec![150], pull_data(&150u8));
+        assert_eq!(vec![150], to_vec(&150u8).unwrap());
     }
 
     #[test]
     fn writes_u16() {
-        assert_eq!(vec![0x34, 0xA2], pull_data(&0xA234u16));
+        assert_eq!(vec![0x34, 0xA2], to_vec(&0xA234u16).unwrap());
     }
 
     #[test]
     fn writes_u32() {
-        assert_eq!(vec![0x45, 0x23, 1, 0xCD], pull_data(&0xCD012345u32));
+        assert_eq!(vec![0x45, 0x23, 1, 0xCD], to_vec(&0xCD012345u32).unwrap());
     }
 
     #[test]
     fn writes_u64() {
         assert_eq!(vec![0xBB, 0xAA, 0x10, 0x32, 0x54, 0x76, 0x98, 0xAB],
-                   pull_data(&0xAB9876543210AABBu64));
+                   to_vec(&0xAB9876543210AABBu64).unwrap());
     }
 
     #[test]
     fn writes_i8() {
-        assert_eq!(vec![156], pull_data(&-100i8));
+        assert_eq!(vec![156], to_vec(&-100i8).unwrap());
     }
 
     #[test]
     fn writes_i16() {
-        assert_eq!(vec![0xD0, 0x8A], pull_data(&-30000i16));
+        assert_eq!(vec![0xD0, 0x8A], to_vec(&-30000i16).unwrap());
     }
 
     #[test]
     fn writes_i32() {
-        assert_eq!(vec![0x00, 0x6C, 0xCA, 0x88], pull_data(&-2000000000i32));
+        assert_eq!(vec![0x00, 0x6C, 0xCA, 0x88],
+                   to_vec(&-2000000000i32).unwrap());
     }
 
     #[test]
     fn writes_i64() {
         assert_eq!(vec![0x00, 0x00, 0x7c, 0x1d, 0xaf, 0x93, 0x19, 0x83],
-                   pull_data(&-9000000000000000000i64));
+                   to_vec(&-9000000000000000000i64).unwrap());
     }
 
     #[test]
     fn writes_f32() {
-        assert_eq!(vec![0x00, 0x70, 0x7b, 0x44], pull_data(&1005.75f32));
+        assert_eq!(vec![0x00, 0x70, 0x7b, 0x44], to_vec(&1005.75f32).unwrap());
     }
 
     #[test]
     fn writes_f64() {
         assert_eq!(vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x6e, 0x8f, 0x40],
-                   pull_data(&1005.75f64));
+                   to_vec(&1005.75f64).unwrap());
     }
 
     #[test]
     fn writes_bool() {
-        assert_eq!(vec![1], pull_data(&true));
-        assert_eq!(vec![0], pull_data(&false));
+        assert_eq!(vec![1], to_vec(&true).unwrap());
+        assert_eq!(vec![0], to_vec(&false).unwrap());
     }
 
     #[test]
     fn writes_string() {
-        assert_eq!(vec![0, 0, 0, 0], pull_data(&""));
+        assert_eq!(vec![0, 0, 0, 0], to_vec(&"").unwrap());
         assert_eq!(vec![13, 0, 0, 0, 72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33],
-                   pull_data(&"Hello, World!"));
+                   to_vec(&"Hello, World!").unwrap());
     }
 
     #[test]
     fn writes_array() {
         assert_eq!(vec![8, 0, 0, 0, 7, 0, 1, 4, 33, 0, 57, 0],
-                   pull_data(&[7i16, 1025, 33, 57]));
+                   to_vec(&[7i16, 1025, 33, 57]).unwrap());
     }
 
     #[test]
     fn writes_vector() {
         assert_eq!(vec![12, 0, 0, 0, 4, 0, 0, 0, 7, 0, 1, 4, 33, 0, 57, 0],
-                   pull_data(&vec![7i16, 1025, 33, 57]));
+                   to_vec(&vec![7i16, 1025, 33, 57]).unwrap());
     }
 
     #[test]
     fn writes_tuple() {
         assert_eq!(vec![26, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49, 50, 8, 0, 0, 0,
                         4, 0, 0, 0, 1, 0, 0, 1],
-                   pull_data(&(2050i16, true, 7u8, "ABC012", vec![true, false, false, true])));
+                   to_vec(&(2050i16, true, 7u8, "ABC012", vec![true, false, false, true]))
+                       .unwrap());
     }
 
     #[derive(Serialize)]
@@ -501,7 +509,7 @@ mod tests {
         };
         assert_eq!(vec![26, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49, 50, 8, 0, 0, 0,
                         4, 0, 0, 0, 1, 0, 0, 1],
-                   pull_data(&v));
+                   to_vec(&v).unwrap());
     }
 
     #[derive(Serialize)]
@@ -538,29 +546,29 @@ mod tests {
         assert_eq!(vec![54, 0, 0, 0, 43, 0, 0, 0, 3, 0, 0, 0, 8, 0, 0, 0, 3, 0, 0, 0, 65, 66, 67,
                         1, 10, 0, 0, 0, 5, 0, 0, 0, 49, 33, 33, 33, 33, 1, 9, 0, 0, 0, 4, 0, 0,
                         0, 50, 51, 52, 98, 0, 3, 0, 0, 0, 69, 69, 101],
-                   pull_data(&v));
+                   to_vec(&v).unwrap());
     }
 
     #[test]
     fn writes_empty_string_string_map() {
-        let data = std::collections::HashMap::<String, String>::new();
-        assert_eq!(vec![0, 0, 0, 0], pull_data(&data));
+        let data = HashMap::<String, String>::new();
+        assert_eq!(vec![0, 0, 0, 0], to_vec(&data).unwrap());
     }
 
     #[test]
     fn writes_single_item_string_string_map() {
-        let mut data = std::collections::HashMap::<String, String>::new();
+        let mut data = HashMap::<String, String>::new();
         data.insert(String::from("abc"), String::from("123"));
         assert_eq!(vec![11, 0, 0, 0, 7, 0, 0, 0, 97, 98, 99, 61, 49, 50, 51],
-                   pull_data(&data));
+                   to_vec(&data).unwrap());
     }
 
     #[test]
     fn writes_multiple_item_string_string_map() {
-        let mut data = std::collections::HashMap::<String, String>::new();
+        let mut data = HashMap::<String, String>::new();
         data.insert(String::from("abc"), String::from("123"));
         data.insert(String::from("AAA"), String::from("B0"));
-        let answer = pull_data(&data);
+        let answer = to_vec(&data).unwrap();
         assert!(vec![21, 0, 0, 0, 7, 0, 0, 0, 97, 98, 99, 61, 49, 50, 51, 6, 0, 0, 0, 65,
                      65, 65, 61, 66, 48] == answer ||
                 vec![21, 0, 0, 0, 6, 0, 0, 0, 65, 65, 65, 61, 66, 48, 7, 0, 0, 0, 97, 98, 99,
