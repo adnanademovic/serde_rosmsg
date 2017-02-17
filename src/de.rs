@@ -2,6 +2,7 @@
 //!
 //! Data types supported by ROSMSG are supported as well. This results in the
 //! lack of support for:
+//!
 //! * Enums of any type, including `Option`
 //! * `char`, so use one character `String`s instead
 //! * Maps that can't be boiled down to `<String, String>`

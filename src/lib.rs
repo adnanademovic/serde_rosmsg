@@ -7,10 +7,13 @@ extern crate error_chain;
 extern crate serde_derive;
 extern crate serde;
 
+#[doc(inline)]
 pub use self::ser::Serializer;
+#[doc(inline)]
 pub use self::de::*;
+#[doc(inline)]
 pub use self::error::Error;
 
-mod ser;
-mod de;
+pub mod ser;
+pub mod de;
 pub mod error;
