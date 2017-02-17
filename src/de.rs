@@ -1,4 +1,13 @@
 //! Deserialize ROSMSG binary data to a Rust data structure.
+//!
+//! Data types supported by ROSMSG are supported as well. This results in the
+//! lack of support for:
+//! * Enums of any type, including `Option`
+//! * `char`, so use one character `String`s instead
+//! * Maps that can't be boiled down to `<String, String>`
+//!
+//! Any methods for blindly identifying structure are not supported, because
+//! the data does not contain any type information.
 
 use byteorder::{LittleEndian, ReadBytesExt};
 use serde::de;
@@ -360,118 +369,171 @@ impl<'a, 'b: 'a, R: io::Read + 'b> de::MapVisitor for MapVisitor<'a, R> {
     }
 }
 
+/// Deserialize an instance of type `T` from an IO stream of ROSMSG data.
+///
+/// This conversion can fail if the passed stream of bytes does not match the
+/// structure expected by `T`. It can also fail if the structure contains
+/// unsupported elements.
+#[inline]
+pub fn from_reader<R, T>(reader: R) -> Result<T>
+    where R: io::Read,
+          T: de::Deserialize
+{
+    T::deserialize(&mut Deserializer::new(reader))
+}
+
+/// Deserialize an instance of type `T` from bytes of ROSMSG data.
+///
+/// This conversion can fail if the passed stream of bytes does not match the
+/// structure expected by `T`. It can also fail if the structure contains
+/// unsupported elements.
+#[inline]
+pub fn from_slice<T>(bytes: &[u8]) -> Result<T>
+    where T: de::Deserialize
+{
+    from_reader(io::Cursor::new(bytes))
+}
+
+/// Deserialize an instance of type `T` from a string of ROSMSG data.
+///
+/// This conversion can fail if the passed stream of bytes does not match the
+/// structure expected by `T`. It can also fail if the structure contains
+/// unsupported elements.
+#[inline]
+pub fn from_str<T>(value: &str) -> Result<T>
+    where T: de::Deserialize
+{
+    from_slice(value.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std;
-    use serde::Deserialize;
-
-    fn push_data(data: Vec<u8>) -> Deserializer<std::io::Cursor<Vec<u8>>> {
-        Deserializer::new(std::io::Cursor::new(data))
-    }
 
     #[test]
     fn reads_u8() {
-        let mut decoder = push_data(vec![150]);
-        assert_eq!(150, u8::deserialize(&mut decoder).unwrap());
+        let data = vec![150];
+        assert_eq!(150u8, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_u16() {
-        let mut decoder = push_data(vec![0x34, 0xA2]);
-        assert_eq!(0xA234, u16::deserialize(&mut decoder).unwrap());
+        let data = vec![0x34, 0xA2];
+        assert_eq!(0xA234u16, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_u32() {
-        let mut decoder = push_data(vec![0x45, 0x23, 1, 0xCD]);
-        assert_eq!(0xCD012345, u32::deserialize(&mut decoder).unwrap());
+        let data = vec![0x45, 0x23, 1, 0xCD];
+        assert_eq!(0xCD012345u32, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_u64() {
-        let mut decoder = push_data(vec![0xBB, 0xAA, 0x10, 0x32, 0x54, 0x76, 0x98, 0xAB]);
-        assert_eq!(0xAB9876543210AABB, u64::deserialize(&mut decoder).unwrap());
+        let data = vec![0xBB, 0xAA, 0x10, 0x32, 0x54, 0x76, 0x98, 0xAB];
+        assert_eq!(0xAB9876543210AABBu64, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_i8() {
-        let mut decoder = push_data(vec![156]);
-        assert_eq!(-100, i8::deserialize(&mut decoder).unwrap());
+        let data = vec![156];
+        assert_eq!(-100i8, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_i16() {
-        let mut decoder = push_data(vec![0xD0, 0x8A]);
-        assert_eq!(-30000, i16::deserialize(&mut decoder).unwrap());
+        let data = vec![0xD0, 0x8A];
+        assert_eq!(-30000i16, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_i32() {
-        let mut decoder = push_data(vec![0x00, 0x6C, 0xCA, 0x88]);
-        assert_eq!(-2000000000, i32::deserialize(&mut decoder).unwrap());
+        let data = vec![0x00, 0x6C, 0xCA, 0x88];
+        assert_eq!(-2000000000i32, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_i64() {
-        let mut decoder = push_data(vec![0x00, 0x00, 0x7c, 0x1d, 0xaf, 0x93, 0x19, 0x83]);
-        assert_eq!(-9000000000000000000,
-                   i64::deserialize(&mut decoder).unwrap());
+        let data = vec![0x00, 0x00, 0x7c, 0x1d, 0xaf, 0x93, 0x19, 0x83];
+        assert_eq!(-9000000000000000000i64, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_f32() {
-        let mut decoder = push_data(vec![0x00, 0x70, 0x7b, 0x44]);
-        assert_eq!(1005.75, f32::deserialize(&mut decoder).unwrap());
+        let data = vec![0x00, 0x70, 0x7b, 0x44];
+        assert_eq!(1005.75f32, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_f64() {
-        let mut decoder = push_data(vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x6e, 0x8f, 0x40]);
-        assert_eq!(1005.75, f64::deserialize(&mut decoder).unwrap());
+        let data = vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x6e, 0x8f, 0x40];
+        assert_eq!(1005.75f64, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_bool() {
-        let mut decoder = push_data(vec![1]);
-        assert_eq!(true, bool::deserialize(&mut decoder).unwrap());
-        let mut decoder = push_data(vec![0]);
-        assert_eq!(false, bool::deserialize(&mut decoder).unwrap());
+        let data = vec![1];
+        assert_eq!(true, from_slice(&data).unwrap());
+        let data = vec![0];
+        assert_eq!(false, from_slice(&data).unwrap());
+    }
+
+    #[test]
+    fn reads_bool_from_string() {
+        assert_eq!(true, from_str("\x01").unwrap());
+        assert_eq!(false, from_str("\x00").unwrap());
     }
 
     #[test]
     fn reads_string() {
-        let mut decoder = push_data(vec![0, 0, 0, 0]);
-        assert_eq!("", String::deserialize(&mut decoder).unwrap());
-        let mut decoder = push_data(vec![13, 0, 0, 0, 72, 101, 108, 108, 111, 44, 32, 87, 111,
-                                         114, 108, 100, 33]);
-        assert_eq!("Hello, World!", String::deserialize(&mut decoder).unwrap());
+        let data = vec![0, 0, 0, 0];
+        assert_eq!("", from_slice::<String>(&data).unwrap());
+        let data = vec![13, 0, 0, 0, 72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33];
+        assert_eq!("Hello, World!", from_slice::<String>(&data).unwrap());
+    }
+
+    #[test]
+    fn reads_string_from_string() {
+        assert_eq!("", from_str::<String>("\0\0\0\0").unwrap());
+        assert_eq!("Hello, World!",
+                   from_str::<String>("\x0d\0\0\0Hello, World!").unwrap());
+    }
+
+    #[test]
+    fn reads_array() {
+        let data = vec![8, 0, 0, 0, 7, 0, 1, 4, 33, 0, 57, 0];
+        assert_eq!([7, 1025, 33, 57], from_slice::<[i16; 4]>(&data).unwrap());
+    }
+
+    #[test]
+    fn reads_array_from_string() {
+        assert_eq!([7, 1025, 32, 65],
+                   from_str::<[i16; 4]>("\x08\0\0\0\x07\0\x01\x04 \0A\0").unwrap());
     }
 
     #[test]
     fn reads_array_struct() {
         #[derive(Debug,Deserialize,PartialEq)]
         struct TestArray([i16; 4]);
-        let mut decoder = push_data(vec![8, 0, 0, 0, 7, 0, 1, 4, 33, 0, 57, 0]);
-        assert_eq!(TestArray([7, 1025, 33, 57]),
-                   TestArray::deserialize(&mut decoder).unwrap());
+        let data = vec![8, 0, 0, 0, 7, 0, 1, 4, 33, 0, 57, 0];
+        assert_eq!(TestArray([7, 1025, 33, 57]), from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_tuple_struct() {
         #[derive(Debug,Deserialize,PartialEq)]
         struct TestTuple(i16, bool, u8, String);
-        let mut decoder = push_data(vec![14, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49,
-                                         50]);
+        let data = vec![14, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49, 50];
         assert_eq!(TestTuple(2050, true, 7, String::from("ABC012")),
-                   TestTuple::deserialize(&mut decoder).unwrap());
+                   from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_vector() {
-        let mut decoder = push_data(vec![12, 0, 0, 0, 4, 0, 0, 0, 7, 0, 1, 4, 33, 0, 57, 0]);
+        let data = vec![12, 0, 0, 0, 4, 0, 0, 0, 7, 0, 1, 4, 33, 0, 57, 0];
         assert_eq!(vec![7, 1025, 33, 57],
-                   Vec::<i16>::deserialize(&mut decoder).unwrap());
+                   from_slice::<Vec<i16>>(&data).unwrap());
     }
 
     #[derive(Debug,Deserialize,PartialEq)]
@@ -492,9 +554,9 @@ mod tests {
             d: String::from("ABC012"),
             e: vec![true, false, false, true],
         };
-        let mut decoder = push_data(vec![26, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49,
-                                         50, 8, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 1]);
-        assert_eq!(v, TestStructOne::deserialize(&mut decoder).unwrap());
+        let data = vec![26, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49, 50, 8, 0, 0, 0,
+                        4, 0, 0, 0, 1, 0, 0, 1];
+        assert_eq!(v, from_slice(&data).unwrap());
     }
 
     #[derive(Debug,Deserialize,PartialEq)]
@@ -528,26 +590,23 @@ mod tests {
             a: parts,
             b: String::from("EEe"),
         };
-        let mut decoder = push_data(vec![54, 0, 0, 0, 43, 0, 0, 0, 3, 0, 0, 0, 8, 0, 0, 0, 3, 0,
-                                         0, 0, 65, 66, 67, 1, 10, 0, 0, 0, 5, 0, 0, 0, 49, 33,
-                                         33, 33, 33, 1, 9, 0, 0, 0, 4, 0, 0, 0, 50, 51, 52, 98,
-                                         0, 3, 0, 0, 0, 69, 69, 101]);
-        assert_eq!(v, TestStructBig::deserialize(&mut decoder).unwrap());
+        let data = vec![54, 0, 0, 0, 43, 0, 0, 0, 3, 0, 0, 0, 8, 0, 0, 0, 3, 0, 0, 0, 65, 66, 67,
+                        1, 10, 0, 0, 0, 5, 0, 0, 0, 49, 33, 33, 33, 33, 1, 9, 0, 0, 0, 4, 0, 0, 0,
+                        50, 51, 52, 98, 0, 3, 0, 0, 0, 69, 69, 101];
+        assert_eq!(v, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_empty_string_string_map() {
         let input = vec![0, 0, 0, 0];
-        let mut decoder = push_data(input);
-        let data = std::collections::HashMap::<String, String>::deserialize(&mut decoder).unwrap();
+        let data = from_slice::<std::collections::HashMap<String, String>>(&input).unwrap();
         assert_eq!(0, data.len());
     }
 
     #[test]
     fn reads_single_element_string_string_map() {
         let input = vec![11, 0, 0, 0, 7, 0, 0, 0, 97, 98, 99, 61, 49, 50, 51];
-        let mut decoder = push_data(input);
-        let data = std::collections::HashMap::<String, String>::deserialize(&mut decoder).unwrap();
+        let data = from_slice::<std::collections::HashMap<String, String>>(&input).unwrap();
         assert_eq!(1, data.len());
         assert_eq!(Some(&String::from("123")), data.get("abc"));
     }
@@ -569,8 +628,7 @@ mod tests {
                          0x70, 0x69, 0x63, 0x3d, 0x2f, 0x63, 0x68, 0x61, 0x74, 0x74, 0x65, 0x72,
                          0x14, 0x00, 0x00, 0x00, 0x74, 0x79, 0x70, 0x65, 0x3d, 0x73, 0x74, 0x64,
                          0x5f, 0x6d, 0x73, 0x67, 0x73, 0x2f, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67];
-        let mut decoder = push_data(input);
-        let data = std::collections::HashMap::<String, String>::deserialize(&mut decoder).unwrap();
+        let data = from_slice::<std::collections::HashMap<String, String>>(&input).unwrap();
         assert_eq!(6, data.len());
         assert_eq!(Some(&String::from("string data\n\n")),
                    data.get("message_definition"));
