@@ -29,6 +29,14 @@ impl<R> Deserializer<R>
     fn pop_length(&mut self) -> io::Result<u32> {
         self.reader.read_u32::<LittleEndian>()
     }
+
+    #[inline]
+    fn get_string(&mut self) -> Result<(u32, String)> {
+        let length = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)?;
+        let mut buffer = vec![0; length as usize];
+        self.reader.read_exact(&mut buffer).chain_err(|| ErrorKind::EndOfBuffer)?;
+        String::from_utf8(buffer).chain_err(|| ErrorKind::BadStringData).map(|v| (length + 4, v))
+    }
 }
 
 macro_rules! impl_nums {
@@ -98,20 +106,14 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        let length = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)?;
-        let mut buffer = vec![0; length as usize];
-        self.reader.read_exact(&mut buffer).chain_err(|| ErrorKind::EndOfBuffer)?;
-        visitor.visit_str(&String::from_utf8(buffer).chain_err(|| ErrorKind::BadStringData)?)
+        visitor.visit_str(&self.get_string()?.1)
     }
 
     #[inline]
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        let length = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)?;
-        let mut buffer = vec![0; length as usize];
-        self.reader.read_exact(&mut buffer).chain_err(|| ErrorKind::EndOfBuffer)?;
-        visitor.visit_string(String::from_utf8(buffer).chain_err(|| ErrorKind::BadStringData)?)
+        visitor.visit_string(self.get_string()?.1)
     }
 
     #[inline]
@@ -201,10 +203,17 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     }
 
     #[inline]
-    fn deserialize_map<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        bail!(ErrorKind::UnsupportedMapType)
+        let size = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)?;
+
+        visitor.visit_map(MapVisitor {
+            deserializer: self,
+            size: size,
+            key: Vec::new(),
+            value: Vec::new(),
+        })
     }
 
     #[inline]
@@ -284,6 +293,70 @@ impl de::Error for Error {
     #[inline]
     fn custom<T: ::std::fmt::Display>(msg: T) -> Self {
         format!("{}", msg).into()
+    }
+}
+
+struct MapVisitor<'a, R: io::Read + 'a> {
+    deserializer: &'a mut Deserializer<R>,
+    key: Vec<u8>,
+    value: Vec<u8>,
+    size: u32,
+}
+
+impl<'a, R: io::Read + 'a> MapVisitor<'a, R> {
+    #[inline]
+    fn pop_item(&mut self) -> Result<()> {
+        let (len, data) = self.deserializer.get_string()?;
+        if self.size < len {
+            bail!(ErrorKind::BadMapEntry)
+        }
+        self.size -= len;
+        let mut data = data.splitn(2, '=');
+        self.key = match data.next() {
+            Some(v) => Self::value_into_bytes(v)?,
+            None => bail!(ErrorKind::BadMapEntry),
+        };
+        self.value = match data.next() {
+            Some(v) => Self::value_into_bytes(v)?,
+            None => bail!(ErrorKind::BadMapEntry),
+        };
+        Ok(())
+    }
+
+    #[inline]
+    fn value_into_bytes(val: &str) -> Result<Vec<u8>> {
+        use super::Serializer;
+        use serde::Serialize;
+        let mut answer = Vec::<u8>::new();
+        val.serialize(&mut Serializer::new(&mut answer))?;
+        Ok(answer)
+    }
+}
+
+impl<'a, 'b: 'a, R: io::Read + 'b> de::MapVisitor for MapVisitor<'a, R> {
+    type Error = Error;
+
+    #[inline]
+    fn visit_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+        where K: de::DeserializeSeed
+    {
+        if self.size > 0 {
+            self.pop_item()?;
+            let mut deserializer = Deserializer::new(io::Cursor::new(&self.key));
+            let key = de::DeserializeSeed::deserialize(seed, &mut deserializer)?;
+            Ok(Some(key))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[inline]
+    fn visit_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
+        where V: de::DeserializeSeed
+    {
+        let mut deserializer = Deserializer::new(io::Cursor::new(&self.value));
+        let value = de::DeserializeSeed::deserialize(seed, &mut deserializer)?;
+        Ok(value)
     }
 }
 
@@ -460,5 +533,53 @@ mod tests {
                                          33, 33, 33, 1, 9, 0, 0, 0, 4, 0, 0, 0, 50, 51, 52, 98,
                                          0, 3, 0, 0, 0, 69, 69, 101]);
         assert_eq!(v, TestStructBig::deserialize(&mut decoder).unwrap());
+    }
+
+    #[test]
+    fn reads_empty_string_string_map() {
+        let input = vec![0, 0, 0, 0];
+        let mut decoder = push_data(input);
+        let data = std::collections::HashMap::<String, String>::deserialize(&mut decoder).unwrap();
+        assert_eq!(0, data.len());
+    }
+
+    #[test]
+    fn reads_single_element_string_string_map() {
+        let input = vec![11, 0, 0, 0, 7, 0, 0, 0, 97, 98, 99, 61, 49, 50, 51];
+        let mut decoder = push_data(input);
+        let data = std::collections::HashMap::<String, String>::deserialize(&mut decoder).unwrap();
+        assert_eq!(1, data.len());
+        assert_eq!(Some(&String::from("123")), data.get("abc"));
+    }
+
+    #[test]
+    fn reads_typical_header() {
+        let input = vec![0xb0, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x6d, 0x65, 0x73, 0x73,
+                         0x61, 0x67, 0x65, 0x5f, 0x64, 0x65, 0x66, 0x69, 0x6e, 0x69, 0x74, 0x69,
+                         0x6f, 0x6e, 0x3d, 0x73, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x20, 0x64, 0x61,
+                         0x74, 0x61, 0x0a, 0x0a, 0x25, 0x00, 0x00, 0x00, 0x63, 0x61, 0x6c, 0x6c,
+                         0x65, 0x72, 0x69, 0x64, 0x3d, 0x2f, 0x72, 0x6f, 0x73, 0x74, 0x6f, 0x70,
+                         0x69, 0x63, 0x5f, 0x34, 0x37, 0x36, 0x37, 0x5f, 0x31, 0x33, 0x31, 0x36,
+                         0x39, 0x31, 0x32, 0x37, 0x34, 0x31, 0x35, 0x35, 0x37, 0x0a, 0x00, 0x00,
+                         0x00, 0x6c, 0x61, 0x74, 0x63, 0x68, 0x69, 0x6e, 0x67, 0x3d, 0x31, 0x27,
+                         0x00, 0x00, 0x00, 0x6d, 0x64, 0x35, 0x73, 0x75, 0x6d, 0x3d, 0x39, 0x39,
+                         0x32, 0x63, 0x65, 0x38, 0x61, 0x31, 0x36, 0x38, 0x37, 0x63, 0x65, 0x63,
+                         0x38, 0x63, 0x38, 0x62, 0x64, 0x38, 0x38, 0x33, 0x65, 0x63, 0x37, 0x33,
+                         0x63, 0x61, 0x34, 0x31, 0x64, 0x31, 0x0e, 0x00, 0x00, 0x00, 0x74, 0x6f,
+                         0x70, 0x69, 0x63, 0x3d, 0x2f, 0x63, 0x68, 0x61, 0x74, 0x74, 0x65, 0x72,
+                         0x14, 0x00, 0x00, 0x00, 0x74, 0x79, 0x70, 0x65, 0x3d, 0x73, 0x74, 0x64,
+                         0x5f, 0x6d, 0x73, 0x67, 0x73, 0x2f, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67];
+        let mut decoder = push_data(input);
+        let data = std::collections::HashMap::<String, String>::deserialize(&mut decoder).unwrap();
+        assert_eq!(6, data.len());
+        assert_eq!(Some(&String::from("string data\n\n")),
+                   data.get("message_definition"));
+        assert_eq!(Some(&String::from("/rostopic_4767_1316912741557")),
+                   data.get("callerid"));
+        assert_eq!(Some(&String::from("1")), data.get("latching"));
+        assert_eq!(Some(&String::from("992ce8a1687cec8c8bd883ec73ca41d1")),
+                   data.get("md5sum"));
+        assert_eq!(Some(&String::from("/chatter")), data.get("topic"));
+        assert_eq!(Some(&String::from("std_msgs/String")), data.get("type"));
     }
 }

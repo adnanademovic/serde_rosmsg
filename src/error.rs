@@ -15,6 +15,10 @@ error_chain! {
             description("Strings need to be UTF-8")
                 display("Strings need to be UTF-8")
         }
+        BadMapEntry {
+            description("Bad map entry format given")
+                display("Map entries need to have a format of \"key=value\"")
+        }
         UnexpectedType(t: String) {
             description("Type was not expected by the deserializer")
                 display("Type was not expected by the deserializer: {}", t)
@@ -26,10 +30,6 @@ error_chain! {
         UnsupportedEnumType {
             description("Enumerations are not supported in ROSMSG")
                 display("Enumerations are not supported in ROSMSG")
-        }
-        UnsupportedMapType {
-            description("Maps are not supported in ROSMSG")
-                display("Maps are not supported in ROSMSG")
         }
         VariableArraySizeAnnotation {
             description("Size annotation in variable size array is missing")
