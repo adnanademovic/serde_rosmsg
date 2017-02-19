@@ -7,6 +7,14 @@ error_chain! {
             description("Deserializer method is not supported in ROSMSG")
                 display("Deserializer method is not supported in ROSMSG: {}", t)
         }
+        Overflow {
+            description("Attempted to read beyond the end of decoded value's length")
+                display("Attempted to read beyond the end of decoded value's length")
+        }
+        Underflow {
+            description("Decoded data is shorter than predicted value length")
+                display("Decoded data is shorter than predicted value length")
+        }
         EndOfBuffer {
             description("Reached end of memory buffer")
                 display("Reached end of memory buffer while reading data")

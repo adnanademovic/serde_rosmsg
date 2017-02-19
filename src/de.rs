@@ -26,8 +26,8 @@ impl<R> Deserializer<R>
 {
     /// Create a new ROSMSG deserializer.
     ///
-    /// The value of `expected_length` is currently only significant when
-    /// dealing with maps.
+    /// The value of `expected_length` tells the deserializer how long the data
+    /// that we want to read is.
     pub fn new(reader: R, expected_length: u32) -> Self {
         Deserializer {
             reader: reader,
@@ -40,26 +40,46 @@ impl<R> Deserializer<R>
         self.reader
     }
 
-    #[inline]
-    fn pop_length(&mut self) -> io::Result<u32> {
-        self.reader.read_u32::<LittleEndian>()
+    /// Check if the deserializer is fully read.
+    ///
+    /// If this is true, one cannot read from the deserializer anymore, and
+    /// should use a different deserializer.
+    pub fn fully_read(&self) -> bool {
+        self.length == 0
     }
 
     #[inline]
-    fn get_string(&mut self) -> Result<(u32, String)> {
-        let length = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)?;
+    fn reserve_bytes(&mut self, size: u32) -> Result<()> {
+        if size > self.length {
+            bail!(ErrorKind::Overflow);
+        }
+        self.length -= size;
+        Ok(())
+    }
+
+    #[inline]
+    fn pop_length(&mut self) -> Result<u32> {
+        self.reserve_bytes(4)?;
+        self.reader.read_u32::<LittleEndian>().chain_err(|| ErrorKind::EndOfBuffer)
+    }
+
+    #[inline]
+    fn get_string(&mut self) -> Result<String> {
+        let length = self.pop_length()?;
+        self.reserve_bytes(length)?;
         let mut buffer = vec![0; length as usize];
         self.reader.read_exact(&mut buffer).chain_err(|| ErrorKind::EndOfBuffer)?;
-        String::from_utf8(buffer).chain_err(|| ErrorKind::BadStringData).map(|v| (length + 4, v))
+        String::from_utf8(buffer).chain_err(|| ErrorKind::BadStringData)
     }
 }
 
 macro_rules! impl_nums {
-    ($ty:ty, $dser_method:ident, $visitor_method:ident, $reader_method:ident) => {
+    ($ty:ty, $dser_method:ident, $visitor_method:ident, $reader_method:ident, $bytes:expr) => {
         #[inline]
         fn $dser_method<V>(self, visitor: V) -> Result<V::Value>
             where V: de::Visitor,
         {
+            self.reserve_bytes($bytes)?;
             let value = self.reader.$reader_method::<LittleEndian>()
                 .chain_err(|| ErrorKind::EndOfBuffer)?;
             visitor.$visitor_method(value)
@@ -81,6 +101,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
+        self.reserve_bytes(1)?;
         let value = self.reader.read_u8().chain_err(|| ErrorKind::EndOfBuffer).map(|v| v != 0)?;
         visitor.visit_bool(value)
     }
@@ -89,6 +110,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
+        self.reserve_bytes(1)?;
         let value = self.reader.read_u8().chain_err(|| ErrorKind::EndOfBuffer)?;
         visitor.visit_u8(value)
     }
@@ -97,18 +119,19 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
+        self.reserve_bytes(1)?;
         let value = self.reader.read_i8().chain_err(|| ErrorKind::EndOfBuffer)?;
         visitor.visit_i8(value)
     }
 
-    impl_nums!(u16, deserialize_u16, visit_u16, read_u16);
-    impl_nums!(u32, deserialize_u32, visit_u32, read_u32);
-    impl_nums!(u64, deserialize_u64, visit_u64, read_u64);
-    impl_nums!(i16, deserialize_i16, visit_i16, read_i16);
-    impl_nums!(i32, deserialize_i32, visit_i32, read_i32);
-    impl_nums!(i64, deserialize_i64, visit_i64, read_i64);
-    impl_nums!(f32, deserialize_f32, visit_f32, read_f32);
-    impl_nums!(f64, deserialize_f64, visit_f64, read_f64);
+    impl_nums!(u16, deserialize_u16, visit_u16, read_u16, 2);
+    impl_nums!(u32, deserialize_u32, visit_u32, read_u32, 4);
+    impl_nums!(u64, deserialize_u64, visit_u64, read_u64, 8);
+    impl_nums!(i16, deserialize_i16, visit_i16, read_i16, 2);
+    impl_nums!(i32, deserialize_i32, visit_i32, read_i32, 4);
+    impl_nums!(i64, deserialize_i64, visit_i64, read_i64, 8);
+    impl_nums!(f32, deserialize_f32, visit_f32, read_f32, 4);
+    impl_nums!(f64, deserialize_f64, visit_f64, read_f64, 8);
 
     #[inline]
     fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value>
@@ -121,14 +144,14 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        visitor.visit_str(&self.get_string()?.1)
+        visitor.visit_str(&self.get_string()?)
     }
 
     #[inline]
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        visitor.visit_string(self.get_string()?.1)
+        visitor.visit_string(self.get_string()?)
     }
 
     #[inline]
@@ -177,7 +200,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        let len = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)? as usize;
+        let len = self.pop_length()? as usize;
 
         visitor.visit_seq(SeqVisitor {
             deserializer: self,
@@ -217,10 +240,8 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        let size = self.length;
         visitor.visit_map(MapVisitor {
             deserializer: self,
-            size: size,
             key: Vec::new(),
             value: Vec::new(),
         })
@@ -310,17 +331,12 @@ struct MapVisitor<'a, R: io::Read + 'a> {
     deserializer: &'a mut Deserializer<R>,
     key: Vec<u8>,
     value: Vec<u8>,
-    size: u32,
 }
 
 impl<'a, R: io::Read + 'a> MapVisitor<'a, R> {
     #[inline]
     fn pop_item(&mut self) -> Result<()> {
-        let (len, data) = self.deserializer.get_string()?;
-        if self.size < len {
-            bail!(ErrorKind::BadMapEntry)
-        }
-        self.size -= len;
+        let data = self.deserializer.get_string()?;
         let mut data = data.splitn(2, '=');
         self.key = match data.next() {
             Some(v) => Self::value_into_bytes(v)?,
@@ -350,14 +366,14 @@ impl<'a, 'b: 'a, R: io::Read + 'b> de::MapVisitor for MapVisitor<'a, R> {
     fn visit_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
         where K: de::DeserializeSeed
     {
-        if self.size > 0 {
+        if self.deserializer.fully_read() {
+            Ok(None)
+        } else {
             self.pop_item()?;
             let mut deserializer = Deserializer::new(io::Cursor::new(&self.key),
                                                      self.key.len() as u32);
             let key = de::DeserializeSeed::deserialize(seed, &mut deserializer)?;
             Ok(Some(key))
-        } else {
-            Ok(None)
         }
     }
 
@@ -382,7 +398,12 @@ pub fn from_reader<R, T>(mut reader: R) -> Result<T>
           T: de::Deserialize
 {
     let length = reader.read_u32::<LittleEndian>()?;
-    T::deserialize(&mut Deserializer::new(reader, length))
+    let mut deserializer = Deserializer::new(reader, length);
+    let value = T::deserialize(&mut deserializer)?;
+    if !deserializer.fully_read() {
+        bail!(ErrorKind::Underflow);
+    }
+    Ok(value)
 }
 
 /// Deserialize an instance of type `T` from bytes of ROSMSG data.
@@ -640,5 +661,43 @@ mod tests {
                    data.get("md5sum"));
         assert_eq!(Some(&String::from("/chatter")), data.get("topic"));
         assert_eq!(Some(&String::from("std_msgs/String")), data.get("type"));
+    }
+
+    #[test]
+    fn reports_end_of_buffer() {
+        let data = vec![4, 0, 0, 0, 0x45, 0x23, 1];
+        let error = from_slice::<u32>(&data).unwrap_err();
+        match *error.kind() {
+            ErrorKind::EndOfBuffer => {}
+            _ => panic!("End of buffer error expected, got: {:?}", error),
+        }
+    }
+
+    #[test]
+    fn reports_attempt_to_read_beyond_prediction() {
+        let data = vec![2, 0, 0, 0, 0x45, 0x23, 1, 0xCD];
+        let error = from_slice::<u32>(&data).unwrap_err();
+        match *error.kind() {
+            ErrorKind::Overflow => {}
+            _ => panic!("Overflow error expected, got: {:?}", error),
+        }
+    }
+
+    #[test]
+    fn reports_failure_to_read_predicted_length() {
+        let data = vec![5, 0, 0, 0, 0x45, 0x23, 1, 0xCD];
+        let error = from_slice::<u32>(&data).unwrap_err();
+        match *error.kind() {
+            ErrorKind::Underflow => {}
+            _ => panic!("Underflow error expected, got: {:?}", error),
+        }
+    }
+
+    #[test]
+    fn requires_right_length_for_vector() {
+        let data = vec![12, 0, 0, 0, 3, 0, 0, 0, 7, 0, 1, 4, 33, 0, 57, 0];
+        from_slice::<Vec<i16>>(&data).unwrap_err();
+        let data = vec![12, 0, 0, 0, 5, 0, 0, 0, 7, 0, 1, 4, 33, 0, 57, 0];
+        from_slice::<Vec<i16>>(&data).unwrap_err();
     }
 }
