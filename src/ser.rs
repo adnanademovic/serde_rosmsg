@@ -21,13 +21,11 @@ impl<W> Serializer<W>
     where W: io::Write
 {
     /// Creates a new ROSMSG serializer.
-    #[inline]
     pub fn new(writer: W) -> Self {
         Serializer { writer: writer }
     }
 
     /// Unwrap the `Writer` from the `Serializer`.
-    #[inline]
     pub fn into_inner(self) -> W {
         self.writer
     }
@@ -361,7 +359,6 @@ impl ser::Error for Error {
 /// fail. It can also fail if the structure contains unsupported elements.
 ///
 /// Finally, it can also fail due to writer failure.
-#[inline]
 pub fn to_writer<W, T>(writer: &mut W, value: &T) -> Result<()>
     where W: io::Write,
           T: ser::Serialize
@@ -377,7 +374,6 @@ pub fn to_writer<W, T>(writer: &mut W, value: &T) -> Result<()>
 ///
 /// Serialization can fail if `T`'s implementation of `Serialize` decides to
 /// fail. It can also fail if the structure contains unsupported elements.
-#[inline]
 pub fn to_vec<T>(value: &T) -> Result<Vec<u8>>
     where T: ser::Serialize
 {

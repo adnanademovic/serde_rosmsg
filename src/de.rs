@@ -28,7 +28,6 @@ impl<R> Deserializer<R>
     ///
     /// The value of `expected_length` is currently only significant when
     /// dealing with maps.
-    #[inline]
     pub fn new(reader: R, expected_length: u32) -> Self {
         Deserializer {
             reader: reader,
@@ -37,7 +36,6 @@ impl<R> Deserializer<R>
     }
 
     /// Unwrap the `Reader` from the `Deserializer`.
-    #[inline]
     pub fn into_inner(self) -> R {
         self.reader
     }
@@ -379,7 +377,6 @@ impl<'a, 'b: 'a, R: io::Read + 'b> de::MapVisitor for MapVisitor<'a, R> {
 /// This conversion can fail if the passed stream of bytes does not match the
 /// structure expected by `T`. It can also fail if the structure contains
 /// unsupported elements.
-#[inline]
 pub fn from_reader<R, T>(mut reader: R) -> Result<T>
     where R: io::Read,
           T: de::Deserialize
@@ -393,7 +390,6 @@ pub fn from_reader<R, T>(mut reader: R) -> Result<T>
 /// This conversion can fail if the passed stream of bytes does not match the
 /// structure expected by `T`. It can also fail if the structure contains
 /// unsupported elements.
-#[inline]
 pub fn from_slice<T>(bytes: &[u8]) -> Result<T>
     where T: de::Deserialize
 {
@@ -405,7 +401,6 @@ pub fn from_slice<T>(bytes: &[u8]) -> Result<T>
 /// This conversion can fail if the passed stream of bytes does not match the
 /// structure expected by `T`. It can also fail if the structure contains
 /// unsupported elements.
-#[inline]
 pub fn from_str<T>(value: &str) -> Result<T>
     where T: de::Deserialize
 {
