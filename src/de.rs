@@ -16,6 +16,11 @@ use super::error::{Error, ErrorKind, Result, ResultExt};
 use std::io;
 
 /// A structure for deserializing ROSMSG into Rust values.
+///
+/// The structure does not read the object size prefix.
+/// It's the user's responsibility to pass the expected object size themselves.
+///
+/// Prefer using `from_reader`, `from_slice` and `from_str`.
 pub struct Deserializer<R> {
     reader: R,
     length: u32,
@@ -28,6 +33,24 @@ impl<R> Deserializer<R>
     ///
     /// The value of `expected_length` tells the deserializer how long the data
     /// that we want to read is.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # extern crate serde_rosmsg;
+    /// # use serde_rosmsg::de::Deserializer;
+    /// # extern crate serde;
+    /// # fn main() {
+    /// use serde::de::Deserialize;
+    ///
+    /// let data = b"\x0d\0\0\0Hello, World!\xAE";
+    /// let length = data.len();
+    /// let cursor = std::io::Cursor::new(&data);
+    /// let mut de = Deserializer::new(cursor, length as u32);
+    /// assert_eq!(String::deserialize(&mut de).unwrap(), "Hello, World!");
+    /// assert_eq!(u8::deserialize(&mut de).unwrap(), 0xAE);
+    /// # }
+    /// ```
     pub fn new(reader: R, expected_length: u32) -> Self {
         Deserializer {
             reader: reader,
@@ -36,6 +59,25 @@ impl<R> Deserializer<R>
     }
 
     /// Unwrap the `Reader` from the `Deserializer`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # extern crate serde_rosmsg;
+    /// # use serde_rosmsg::de::Deserializer;
+    /// # extern crate serde;
+    /// # fn main() {
+    /// use serde::de::Deserialize;
+    ///
+    /// let data = [2, 4, 8, 16];
+    /// let cursor = std::io::Cursor::new(&data);
+    /// let mut de = Deserializer::new(cursor, 2);
+    /// assert_eq!(u16::deserialize(&mut de).unwrap(), 1026);
+    /// let cursor_new = de.into_inner();
+    /// let mut de_new = Deserializer::new(cursor_new, 2);
+    /// assert_eq!(u16::deserialize(&mut de_new).unwrap(), 4104);
+    /// # }
+    /// ```
     pub fn into_inner(self) -> R {
         self.reader
     }
@@ -44,7 +86,27 @@ impl<R> Deserializer<R>
     ///
     /// If this is true, one cannot read from the deserializer anymore, and
     /// should use a different deserializer.
-    pub fn fully_read(&self) -> bool {
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # extern crate serde_rosmsg;
+    /// # use serde_rosmsg::de::Deserializer;
+    /// # extern crate serde;
+    /// # fn main() {
+    /// use serde::de::Deserialize;
+    ///
+    /// let data = [2, 4, 8, 16];
+    /// let mut de = Deserializer::new(std::io::Cursor::new(&data), 4);
+    /// assert_eq!(de.is_fully_read(), false);  // Still 4 bytes left to read
+    /// u16::deserialize(&mut de).unwrap();     // Read 2 bytes
+    /// assert_eq!(de.is_fully_read(), false);  // Still 2 bytes left to read
+    /// u16::deserialize(&mut de).unwrap();     // Read 2 bytes
+    /// assert_eq!(de.is_fully_read(), true);   // No more bytes left to read
+    /// u16::deserialize(&mut de).unwrap_err(); // Failure to read more
+    /// # }
+    /// ```
+    pub fn is_fully_read(&self) -> bool {
         self.length == 0
     }
 
@@ -366,7 +428,7 @@ impl<'a, 'b: 'a, R: io::Read + 'b> de::MapVisitor for MapVisitor<'a, R> {
     fn visit_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
         where K: de::DeserializeSeed
     {
-        if self.deserializer.fully_read() {
+        if self.deserializer.is_fully_read() {
             Ok(None)
         } else {
             self.pop_item()?;
@@ -393,6 +455,25 @@ impl<'a, 'b: 'a, R: io::Read + 'b> de::MapVisitor for MapVisitor<'a, R> {
 /// This conversion can fail if the passed stream of bytes does not match the
 /// structure expected by `T`. It can also fail if the structure contains
 /// unsupported elements.
+///
+/// # Examples
+///
+/// ```rust
+/// # use serde_rosmsg::de::from_reader;
+/// # use std;
+/// let data = [
+///     17, 0, 0, 0,
+///     13, 0, 0, 0,
+///     72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33];
+/// let mut cursor = std::io::Cursor::new(&data);
+/// let value: String = from_reader(&mut cursor).unwrap();
+/// assert_eq!(value, "Hello, World!");
+///
+/// let data = [4, 0, 0, 0, 2, 4, 8, 16];
+/// let mut cursor = std::io::Cursor::new(&data);
+/// let value: (u16, u16) = from_reader(&mut cursor).unwrap();
+/// assert_eq!(value, (1026, 4104));
+/// ```
 pub fn from_reader<R, T>(mut reader: R) -> Result<T>
     where R: io::Read,
           T: de::Deserialize
@@ -400,7 +481,7 @@ pub fn from_reader<R, T>(mut reader: R) -> Result<T>
     let length = reader.read_u32::<LittleEndian>()?;
     let mut deserializer = Deserializer::new(reader, length);
     let value = T::deserialize(&mut deserializer)?;
-    if !deserializer.fully_read() {
+    if !deserializer.is_fully_read() {
         bail!(ErrorKind::Underflow);
     }
     Ok(value)
@@ -411,6 +492,20 @@ pub fn from_reader<R, T>(mut reader: R) -> Result<T>
 /// This conversion can fail if the passed stream of bytes does not match the
 /// structure expected by `T`. It can also fail if the structure contains
 /// unsupported elements.
+///
+/// # Examples
+///
+/// ```rust
+/// # use serde_rosmsg::de::from_slice;
+/// let value: String = from_slice(&[
+///     17, 0, 0, 0,
+///     13, 0, 0, 0,
+///     72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33]).unwrap();
+/// assert_eq!(value, "Hello, World!");
+///
+/// let value: (u16, u16) = from_slice(&[4, 0, 0, 0, 2, 4, 8, 16]).unwrap();
+/// assert_eq!(value, (1026, 4104));
+/// ```
 pub fn from_slice<T>(bytes: &[u8]) -> Result<T>
     where T: de::Deserialize
 {
@@ -422,6 +517,17 @@ pub fn from_slice<T>(bytes: &[u8]) -> Result<T>
 /// This conversion can fail if the passed stream of bytes does not match the
 /// structure expected by `T`. It can also fail if the structure contains
 /// unsupported elements.
+///
+/// # Examples
+///
+/// ```rust
+/// # use serde_rosmsg::de::from_str;
+/// let value: String = from_str("\x11\0\0\0\x0d\0\0\0Hello, World!").unwrap();
+/// assert_eq!(value, "Hello, World!");
+///
+/// let value: (u16, u16) = from_str("\x04\0\0\0\x02\x04\x08\x10").unwrap();
+/// assert_eq!(value, (1026, 4104));
+/// ```
 pub fn from_str<T>(value: &str) -> Result<T>
     where T: de::Deserialize
 {

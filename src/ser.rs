@@ -13,6 +13,11 @@ use super::error::{Error, ErrorKind, Result};
 use std::io;
 
 /// A structure for serializing Rust values into ROSMSG binary data.
+///
+/// The structure does not write the object size prefix.
+/// It's the user's responsibility to write the object size themselves.
+///
+/// Prefer using `to_writer` and `to_vec`.
 pub struct Serializer<W> {
     writer: W,
 }
@@ -21,11 +26,51 @@ impl<W> Serializer<W>
     where W: io::Write
 {
     /// Creates a new ROSMSG serializer.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # extern crate serde_rosmsg;
+    /// # use serde_rosmsg::ser::Serializer;
+    /// # extern crate serde;
+    /// # fn main() {
+    /// use serde::ser::Serialize;
+    ///
+    /// let mut cursor = std::io::Cursor::new(Vec::new());
+    /// String::from("Hello, World!").serialize(
+    ///         &mut Serializer::new(&mut cursor)).unwrap();
+    ///
+    /// assert_eq!(cursor.into_inner(), b"\x0d\0\0\0Hello, World!");
+    /// # }
+    /// ```
     pub fn new(writer: W) -> Self {
         Serializer { writer: writer }
     }
 
     /// Unwrap the `Writer` from the `Serializer`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # extern crate serde_rosmsg;
+    /// # use serde_rosmsg::ser::Serializer;
+    /// # extern crate serde;
+    /// # fn main() {
+    /// use serde::ser::Serialize;
+    ///
+    /// let mut ser = Serializer::new(std::io::Cursor::new(Vec::new()));
+    /// String::from("Hello, World!").serialize(&mut ser).unwrap();
+    ///
+    /// // Get the cursor that was passed to the serializer
+    /// let cursor: std::io::Cursor<Vec<u8>> = ser.into_inner();
+    ///
+    /// // Get the data from the cursor. This method is unrelated to
+    /// // Serializer's into_inner(), and is part of Cursor
+    /// let data = cursor.into_inner();
+    ///
+    /// assert_eq!(data, b"\x0d\0\0\0Hello, World!");
+    /// # }
+    /// ```
     pub fn into_inner(self) -> W {
         self.writer
     }
@@ -359,6 +404,16 @@ impl ser::Error for Error {
 /// fail. It can also fail if the structure contains unsupported elements.
 ///
 /// Finally, it can also fail due to writer failure.
+///
+/// # Examples
+///
+/// ```rust
+/// # use serde_rosmsg::ser::to_writer;
+/// # use std;
+/// let mut cursor = std::io::Cursor::new(Vec::new());
+/// to_writer(&mut cursor, &String::from("Hello, World!")).unwrap();
+/// assert_eq!(cursor.into_inner(), b"\x11\0\0\0\x0d\0\0\0Hello, World!");
+/// ```
 pub fn to_writer<W, T>(writer: &mut W, value: &T) -> Result<()>
     where W: io::Write,
           T: ser::Serialize
@@ -374,6 +429,14 @@ pub fn to_writer<W, T>(writer: &mut W, value: &T) -> Result<()>
 ///
 /// Serialization can fail if `T`'s implementation of `Serialize` decides to
 /// fail. It can also fail if the structure contains unsupported elements.
+///
+/// # Examples
+///
+/// ```rust
+/// # use serde_rosmsg::ser::to_vec;
+/// let data = to_vec(&String::from("Hello, World!")).unwrap();
+/// assert_eq!(data, b"\x11\0\0\0\x0d\0\0\0Hello, World!");
+/// ```
 pub fn to_vec<T>(value: &T) -> Result<Vec<u8>>
     where T: ser::Serialize
 {
