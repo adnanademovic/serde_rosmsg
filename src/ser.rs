@@ -153,15 +153,11 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
 
     #[inline]
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
-        use serde::Serialize;
-        let size = match len {
-            Some(v) => v as u32,
+        match len {
+            Some(len) => self.serialize_u32(len as u32)?,
             None => bail!(ErrorKind::VariableArraySizeAnnotation),
         };
-
-        let mut v = Compound::new(self);
-        size.serialize(&mut Serializer::new(&mut v.buffer))?;
-        Ok(v)
+        Ok(Compound::new(self))
     }
 
     #[inline]
@@ -216,16 +212,12 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
 #[doc(hidden)]
 pub struct Compound<'a, W: 'a> {
     ser: &'a mut Serializer<W>,
-    buffer: Vec<u8>,
 }
 
 impl<'a, W> Compound<'a, W> {
     #[inline]
     fn new(ser: &'a mut Serializer<W>) -> Compound<'a, W> {
-        Compound {
-            ser: ser,
-            buffer: Vec::new(),
-        }
+        Compound { ser: ser }
     }
 }
 
@@ -239,13 +231,12 @@ impl<'a, W> ser::SerializeSeq for Compound<'a, W>
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
         where T: ser::Serialize
     {
-        value.serialize(&mut Serializer::new(&mut self.buffer))
+        value.serialize(&mut *self.ser)
     }
 
     #[inline]
     fn end(self) -> Result<()> {
-        use serde::Serializer;
-        self.ser.serialize_bytes(&self.buffer)
+        Ok(())
     }
 }
 
@@ -259,13 +250,12 @@ impl<'a, W> ser::SerializeTuple for Compound<'a, W>
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
         where T: ser::Serialize
     {
-        value.serialize(&mut Serializer::new(&mut self.buffer))
+        value.serialize(&mut *self.ser)
     }
 
     #[inline]
     fn end(self) -> Result<()> {
-        use serde::Serializer;
-        self.ser.serialize_bytes(&self.buffer)
+        Ok(())
     }
 }
 
@@ -279,13 +269,12 @@ impl<'a, W> ser::SerializeTupleStruct for Compound<'a, W>
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<()>
         where T: ser::Serialize
     {
-        value.serialize(&mut Serializer::new(&mut self.buffer))
+        value.serialize(&mut *self.ser)
     }
 
     #[inline]
     fn end(self) -> Result<()> {
-        use serde::Serializer;
-        self.ser.serialize_bytes(&self.buffer)
+        Ok(())
     }
 }
 
@@ -299,20 +288,18 @@ impl<'a, W> ser::SerializeStruct for Compound<'a, W>
     fn serialize_field<T: ?Sized>(&mut self, _key: &'static str, value: &T) -> Result<()>
         where T: ser::Serialize
     {
-        value.serialize(&mut Serializer::new(&mut self.buffer))
+        value.serialize(&mut *self.ser)
     }
 
     #[inline]
     fn end(self) -> Result<()> {
-        use serde::Serializer;
-        self.ser.serialize_bytes(&self.buffer)
+        Ok(())
     }
 }
 
 #[doc(hidden)]
 pub struct CompoundMap<'a, W: 'a> {
     ser: &'a mut Serializer<W>,
-    buffer: Serializer<Vec<u8>>,
     item: Vec<u8>,
 }
 
@@ -321,7 +308,6 @@ impl<'a, W> CompoundMap<'a, W> {
     fn new(ser: &'a mut Serializer<W>) -> CompoundMap<'a, W> {
         CompoundMap {
             ser: ser,
-            buffer: Serializer::new(Vec::new()),
             item: Vec::new(),
         }
     }
@@ -353,13 +339,12 @@ impl<'a, W> ser::SerializeMap for CompoundMap<'a, W>
         let mut buffer = Vec::<u8>::new();
         value.serialize(&mut Serializer::new(&mut buffer))?;
         self.item.extend(buffer.into_iter().skip(4));
-        self.buffer.serialize_bytes(&self.item)
+        self.ser.serialize_bytes(&self.item)
     }
 
     #[inline]
     fn end(self) -> Result<()> {
-        use serde::Serializer;
-        self.ser.serialize_bytes(&self.buffer.into_inner())
+        Ok(())
     }
 }
 
@@ -381,7 +366,11 @@ pub fn to_writer<W, T>(writer: &mut W, value: &T) -> Result<()>
     where W: io::Write,
           T: ser::Serialize
 {
-    value.serialize(&mut Serializer::new(writer))
+    let mut buffer = Vec::new();
+    value.serialize(&mut Serializer::new(&mut buffer))?;
+    writer.write_u32::<LittleEndian>(buffer.len() as u32)
+        .and_then(|_| writer.write_all(&buffer))
+        .map_err(|v| v.into())
 }
 
 /// Serialize the given data structure `T` as a ROSMSG byte vector.
@@ -404,68 +393,71 @@ mod tests {
 
     #[test]
     fn writes_u8() {
-        assert_eq!(vec![150], to_vec(&150u8).unwrap());
+        assert_eq!(vec![1, 0, 0, 0, 150], to_vec(&150u8).unwrap());
     }
 
     #[test]
     fn writes_u16() {
-        assert_eq!(vec![0x34, 0xA2], to_vec(&0xA234u16).unwrap());
+        assert_eq!(vec![2, 0, 0, 0, 0x34, 0xA2], to_vec(&0xA234u16).unwrap());
     }
 
     #[test]
     fn writes_u32() {
-        assert_eq!(vec![0x45, 0x23, 1, 0xCD], to_vec(&0xCD012345u32).unwrap());
+        assert_eq!(vec![4, 0, 0, 0, 0x45, 0x23, 1, 0xCD],
+                   to_vec(&0xCD012345u32).unwrap());
     }
 
     #[test]
     fn writes_u64() {
-        assert_eq!(vec![0xBB, 0xAA, 0x10, 0x32, 0x54, 0x76, 0x98, 0xAB],
+        assert_eq!(vec![8, 0, 0, 0, 0xBB, 0xAA, 0x10, 0x32, 0x54, 0x76, 0x98, 0xAB],
                    to_vec(&0xAB9876543210AABBu64).unwrap());
     }
 
     #[test]
     fn writes_i8() {
-        assert_eq!(vec![156], to_vec(&-100i8).unwrap());
+        assert_eq!(vec![1, 0, 0, 0, 156], to_vec(&-100i8).unwrap());
     }
 
     #[test]
     fn writes_i16() {
-        assert_eq!(vec![0xD0, 0x8A], to_vec(&-30000i16).unwrap());
+        assert_eq!(vec![2, 0, 0, 0, 0xD0, 0x8A], to_vec(&-30000i16).unwrap());
     }
 
     #[test]
     fn writes_i32() {
-        assert_eq!(vec![0x00, 0x6C, 0xCA, 0x88],
+        assert_eq!(vec![4, 0, 0, 0, 0x00, 0x6C, 0xCA, 0x88],
                    to_vec(&-2000000000i32).unwrap());
     }
 
     #[test]
     fn writes_i64() {
-        assert_eq!(vec![0x00, 0x00, 0x7c, 0x1d, 0xaf, 0x93, 0x19, 0x83],
+        assert_eq!(vec![8, 0, 0, 0, 0x00, 0x00, 0x7c, 0x1d, 0xaf, 0x93, 0x19, 0x83],
                    to_vec(&-9000000000000000000i64).unwrap());
     }
 
     #[test]
     fn writes_f32() {
-        assert_eq!(vec![0x00, 0x70, 0x7b, 0x44], to_vec(&1005.75f32).unwrap());
+        assert_eq!(vec![4, 0, 0, 0, 0x00, 0x70, 0x7b, 0x44],
+                   to_vec(&1005.75f32).unwrap());
     }
 
     #[test]
     fn writes_f64() {
-        assert_eq!(vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x6e, 0x8f, 0x40],
+        assert_eq!(vec![8, 0, 0, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6e, 0x8f, 0x40],
                    to_vec(&1005.75f64).unwrap());
     }
 
     #[test]
     fn writes_bool() {
-        assert_eq!(vec![1], to_vec(&true).unwrap());
-        assert_eq!(vec![0], to_vec(&false).unwrap());
+        assert_eq!(vec![1, 0, 0, 0, 1], to_vec(&true).unwrap());
+        assert_eq!(vec![1, 0, 0, 0, 0], to_vec(&false).unwrap());
     }
 
     #[test]
     fn writes_string() {
-        assert_eq!(vec![0, 0, 0, 0], to_vec(&"").unwrap());
-        assert_eq!(vec![13, 0, 0, 0, 72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33],
+        assert_eq!(vec![4, 0, 0, 0, 0, 0, 0, 0], to_vec(&"").unwrap());
+        assert_eq!(vec![17, 0, 0, 0, 13, 0, 0, 0, 72, 101, 108, 108, 111, 44, 32, 87, 111, 114,
+                        108, 100, 33],
                    to_vec(&"Hello, World!").unwrap());
     }
 
@@ -483,8 +475,8 @@ mod tests {
 
     #[test]
     fn writes_tuple() {
-        assert_eq!(vec![26, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49, 50, 8, 0, 0, 0,
-                        4, 0, 0, 0, 1, 0, 0, 1],
+        assert_eq!(vec![22, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49, 50, 4, 0, 0, 0,
+                        1, 0, 0, 1],
                    to_vec(&(2050i16, true, 7u8, "ABC012", vec![true, false, false, true]))
                        .unwrap());
     }
@@ -507,8 +499,8 @@ mod tests {
             d: String::from("ABC012"),
             e: vec![true, false, false, true],
         };
-        assert_eq!(vec![26, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49, 50, 8, 0, 0, 0,
-                        4, 0, 0, 0, 1, 0, 0, 1],
+        assert_eq!(vec![22, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49, 50, 4, 0, 0, 0,
+                        1, 0, 0, 1],
                    to_vec(&v).unwrap());
     }
 
@@ -543,9 +535,8 @@ mod tests {
             a: parts,
             b: String::from("EEe"),
         };
-        assert_eq!(vec![54, 0, 0, 0, 43, 0, 0, 0, 3, 0, 0, 0, 8, 0, 0, 0, 3, 0, 0, 0, 65, 66, 67,
-                        1, 10, 0, 0, 0, 5, 0, 0, 0, 49, 33, 33, 33, 33, 1, 9, 0, 0, 0, 4, 0, 0,
-                        0, 50, 51, 52, 98, 0, 3, 0, 0, 0, 69, 69, 101],
+        assert_eq!(vec![38, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0, 65, 66, 67, 1, 5, 0, 0, 0, 49, 33,
+                        33, 33, 33, 1, 4, 0, 0, 0, 50, 51, 52, 98, 0, 3, 0, 0, 0, 69, 69, 101],
                    to_vec(&v).unwrap());
     }
 

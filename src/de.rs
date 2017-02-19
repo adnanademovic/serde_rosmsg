@@ -18,6 +18,7 @@ use std::io;
 /// A structure for deserializing ROSMSG into Rust values
 pub struct Deserializer<R> {
     reader: R,
+    length: u32,
 }
 
 impl<R> Deserializer<R>
@@ -25,8 +26,11 @@ impl<R> Deserializer<R>
 {
     /// Create a new ROSMSG deserializer.
     #[inline]
-    pub fn new(reader: R) -> Self {
-        Deserializer { reader: reader }
+    pub fn new(reader: R, expected_length: u32) -> Self {
+        Deserializer {
+            reader: reader,
+            length: expected_length,
+        }
     }
 
     /// Unwrap the `Reader` from the `Deserializer`.
@@ -172,7 +176,6 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        let _size = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)?;
         let len = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)? as usize;
 
         visitor.visit_seq(SeqVisitor {
@@ -185,8 +188,6 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_seq_fixed_size<V>(self, len: usize, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        let _size = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)?;
-
         visitor.visit_seq(SeqVisitor {
             deserializer: self,
             len: len,
@@ -197,7 +198,6 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        let _size = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)?;
         visitor.visit_seq(TupleVisitor(self))
     }
 
@@ -216,8 +216,7 @@ impl<'a, R: io::Read> de::Deserializer for &'a mut Deserializer<R> {
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
         where V: de::Visitor
     {
-        let size = self.pop_length().chain_err(|| ErrorKind::EndOfBuffer)?;
-
+        let size = self.length;
         visitor.visit_map(MapVisitor {
             deserializer: self,
             size: size,
@@ -352,7 +351,8 @@ impl<'a, 'b: 'a, R: io::Read + 'b> de::MapVisitor for MapVisitor<'a, R> {
     {
         if self.size > 0 {
             self.pop_item()?;
-            let mut deserializer = Deserializer::new(io::Cursor::new(&self.key));
+            let mut deserializer = Deserializer::new(io::Cursor::new(&self.key),
+                                                     self.key.len() as u32);
             let key = de::DeserializeSeed::deserialize(seed, &mut deserializer)?;
             Ok(Some(key))
         } else {
@@ -364,7 +364,8 @@ impl<'a, 'b: 'a, R: io::Read + 'b> de::MapVisitor for MapVisitor<'a, R> {
     fn visit_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
         where V: de::DeserializeSeed
     {
-        let mut deserializer = Deserializer::new(io::Cursor::new(&self.value));
+        let mut deserializer = Deserializer::new(io::Cursor::new(&self.value),
+                                                 self.value.len() as u32);
         let value = de::DeserializeSeed::deserialize(seed, &mut deserializer)?;
         Ok(value)
     }
@@ -376,11 +377,12 @@ impl<'a, 'b: 'a, R: io::Read + 'b> de::MapVisitor for MapVisitor<'a, R> {
 /// structure expected by `T`. It can also fail if the structure contains
 /// unsupported elements.
 #[inline]
-pub fn from_reader<R, T>(reader: R) -> Result<T>
+pub fn from_reader<R, T>(mut reader: R) -> Result<T>
     where R: io::Read,
           T: de::Deserialize
 {
-    T::deserialize(&mut Deserializer::new(reader))
+    let length = reader.read_u32::<LittleEndian>()?;
+    T::deserialize(&mut Deserializer::new(reader, length))
 }
 
 /// Deserialize an instance of type `T` from bytes of ROSMSG data.
@@ -414,91 +416,92 @@ mod tests {
 
     #[test]
     fn reads_u8() {
-        let data = vec![150];
+        let data = vec![1, 0, 0, 0, 150];
         assert_eq!(150u8, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_u16() {
-        let data = vec![0x34, 0xA2];
+        let data = vec![2, 0, 0, 0, 0x34, 0xA2];
         assert_eq!(0xA234u16, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_u32() {
-        let data = vec![0x45, 0x23, 1, 0xCD];
+        let data = vec![4, 0, 0, 0, 0x45, 0x23, 1, 0xCD];
         assert_eq!(0xCD012345u32, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_u64() {
-        let data = vec![0xBB, 0xAA, 0x10, 0x32, 0x54, 0x76, 0x98, 0xAB];
+        let data = vec![8, 0, 0, 0, 0xBB, 0xAA, 0x10, 0x32, 0x54, 0x76, 0x98, 0xAB];
         assert_eq!(0xAB9876543210AABBu64, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_i8() {
-        let data = vec![156];
+        let data = vec![1, 0, 0, 0, 156];
         assert_eq!(-100i8, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_i16() {
-        let data = vec![0xD0, 0x8A];
+        let data = vec![2, 0, 0, 0, 0xD0, 0x8A];
         assert_eq!(-30000i16, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_i32() {
-        let data = vec![0x00, 0x6C, 0xCA, 0x88];
+        let data = vec![4, 0, 0, 0, 0x00, 0x6C, 0xCA, 0x88];
         assert_eq!(-2000000000i32, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_i64() {
-        let data = vec![0x00, 0x00, 0x7c, 0x1d, 0xaf, 0x93, 0x19, 0x83];
+        let data = vec![8, 0, 0, 0, 0x00, 0x00, 0x7c, 0x1d, 0xaf, 0x93, 0x19, 0x83];
         assert_eq!(-9000000000000000000i64, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_f32() {
-        let data = vec![0x00, 0x70, 0x7b, 0x44];
+        let data = vec![4, 0, 0, 0, 0x00, 0x70, 0x7b, 0x44];
         assert_eq!(1005.75f32, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_f64() {
-        let data = vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x6e, 0x8f, 0x40];
+        let data = vec![8, 0, 0, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x6e, 0x8f, 0x40];
         assert_eq!(1005.75f64, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_bool() {
-        let data = vec![1];
+        let data = vec![1, 0, 0, 0, 1];
         assert_eq!(true, from_slice(&data).unwrap());
-        let data = vec![0];
+        let data = vec![1, 0, 0, 0, 0];
         assert_eq!(false, from_slice(&data).unwrap());
     }
 
     #[test]
     fn reads_bool_from_string() {
-        assert_eq!(true, from_str("\x01").unwrap());
-        assert_eq!(false, from_str("\x00").unwrap());
+        assert_eq!(true, from_str("\x01\0\0\0\x01").unwrap());
+        assert_eq!(false, from_str("\x01\0\0\0\x00").unwrap());
     }
 
     #[test]
     fn reads_string() {
-        let data = vec![0, 0, 0, 0];
+        let data = vec![4, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!("", from_slice::<String>(&data).unwrap());
-        let data = vec![13, 0, 0, 0, 72, 101, 108, 108, 111, 44, 32, 87, 111, 114, 108, 100, 33];
+        let data = vec![17, 0, 0, 0, 13, 0, 0, 0, 72, 101, 108, 108, 111, 44, 32, 87, 111, 114,
+                        108, 100, 33];
         assert_eq!("Hello, World!", from_slice::<String>(&data).unwrap());
     }
 
     #[test]
     fn reads_string_from_string() {
-        assert_eq!("", from_str::<String>("\0\0\0\0").unwrap());
+        assert_eq!("", from_str::<String>("\x04\0\0\0\0\0\0\0").unwrap());
         assert_eq!("Hello, World!",
-                   from_str::<String>("\x0d\0\0\0Hello, World!").unwrap());
+                   from_str::<String>("\x11\0\0\0\x0d\0\0\0Hello, World!").unwrap());
     }
 
     #[test]
@@ -555,8 +558,8 @@ mod tests {
             d: String::from("ABC012"),
             e: vec![true, false, false, true],
         };
-        let data = vec![26, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49, 50, 8, 0, 0, 0,
-                        4, 0, 0, 0, 1, 0, 0, 1];
+        let data = vec![22, 0, 0, 0, 2, 8, 1, 7, 6, 0, 0, 0, 65, 66, 67, 48, 49, 50, 4, 0, 0, 0,
+                        1, 0, 0, 1];
         assert_eq!(v, from_slice(&data).unwrap());
     }
 
@@ -591,9 +594,8 @@ mod tests {
             a: parts,
             b: String::from("EEe"),
         };
-        let data = vec![54, 0, 0, 0, 43, 0, 0, 0, 3, 0, 0, 0, 8, 0, 0, 0, 3, 0, 0, 0, 65, 66, 67,
-                        1, 10, 0, 0, 0, 5, 0, 0, 0, 49, 33, 33, 33, 33, 1, 9, 0, 0, 0, 4, 0, 0, 0,
-                        50, 51, 52, 98, 0, 3, 0, 0, 0, 69, 69, 101];
+        let data = vec![38, 0, 0, 0, 3, 0, 0, 0, 3, 0, 0, 0, 65, 66, 67, 1, 5, 0, 0, 0, 49, 33,
+                        33, 33, 33, 1, 4, 0, 0, 0, 50, 51, 52, 98, 0, 3, 0, 0, 0, 69, 69, 101];
         assert_eq!(v, from_slice(&data).unwrap());
     }
 
