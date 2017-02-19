@@ -2,6 +2,7 @@
 authors = ["Adnan Ademovic <adnanademovic100@gmail.com>"]
 categories = ["encoding"]
 description = "A rosmsg serialization file format"
+documentation = "https://docs.rs/serde_rosmsg/0.1.0/serde_rosmsg"
 keywords = ["ros", "rosmsg", "serde", "serialization"]
 license = "MIT"
 name = "serde_rosmsg"
@@ -10,7 +11,9 @@ repository = "https://github.com/adnanademovic/serde_rosmsg"
 version = "0.1.0"
 
 [badges]
-travis-ci = { repository = "adnanademovic/serde_rosmsg" }
+
+[badges.travis-ci]
+repository = "adnanademovic/serde_rosmsg"
 
 [dependencies]
 byteorder = "1.0.0"
