@@ -7,7 +7,7 @@ license = "MIT"
 name = "serde_rosmsg"
 readme = "README.md"
 repository = "https://github.com/adnanademovic/serde_rosmsg"
-version = "0.0.0"
+version = "0.1.0"
 
 [badges]
 travis-ci = { repository = "adnanademovic/serde_rosmsg" }

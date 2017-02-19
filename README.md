@@ -1,5 +1,7 @@
 # Serde rosmsg
 
+[![MIT Licensed](https://img.shields.io/crates/l/serde_rosmsg.svg?maxAge=3600)](./LICENSE)
+[![Crates.io](https://img.shields.io/crates/v/serde_rosmsg.svg?maxAge=3600)](https://crates.io/crates/serde_rosmsg)
 [![Build Status](https://travis-ci.org/adnanademovic/serde_rosmsg.svg?branch=master)](https://travis-ci.org/adnanademovic/serde_rosmsg)
 
 **serde_rosmsg** is a Rust serializer to the [`rosmsg`](http://wiki.ros.org/msg) data format, used in TCPROS and UDPROS.
