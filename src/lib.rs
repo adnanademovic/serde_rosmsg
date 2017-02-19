@@ -17,3 +17,4 @@ pub use self::error::Error;
 pub mod ser;
 pub mod de;
 pub mod error;
+mod datatests;
