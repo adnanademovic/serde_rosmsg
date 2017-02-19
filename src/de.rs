@@ -15,7 +15,7 @@ use serde::de;
 use super::error::{Error, ErrorKind, Result, ResultExt};
 use std::io;
 
-/// A structure for deserializing ROSMSG into Rust values
+/// A structure for deserializing ROSMSG into Rust values.
 pub struct Deserializer<R> {
     reader: R,
     length: u32,
@@ -25,6 +25,9 @@ impl<R> Deserializer<R>
     where R: io::Read
 {
     /// Create a new ROSMSG deserializer.
+    ///
+    /// The value of `expected_length` is currently only significant when
+    /// dealing with maps.
     #[inline]
     pub fn new(reader: R, expected_length: u32) -> Self {
         Deserializer {
