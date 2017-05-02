@@ -107,7 +107,9 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
 
     #[inline]
     fn serialize_bool(self, v: bool) -> SerializerResult {
-        self.writer.write_u8(if v { 1 } else { 0 }).map_err(|v| v.into())
+        self.writer
+            .write_u8(if v { 1 } else { 0 })
+            .map_err(|v| v.into())
     }
 
     #[inline]
@@ -170,7 +172,7 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
     #[inline]
     fn serialize_unit_variant(self,
                               _name: &'static str,
-                              _variant_index: usize,
+                              _variant_index: u32,
                               _variant: &'static str)
                               -> SerializerResult {
         bail!(ErrorKind::UnsupportedEnumType)
@@ -187,7 +189,7 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
     #[inline]
     fn serialize_newtype_variant<T: ?Sized + ser::Serialize>(self,
                                                              _name: &'static str,
-                                                             _variant_index: usize,
+                                                             _variant_index: u32,
                                                              _variant: &'static str,
                                                              _value: &T)
                                                              -> SerializerResult {
@@ -204,13 +206,8 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
     }
 
     #[inline]
-    fn serialize_seq_fixed_size(self, _size: usize) -> Result<Self::SerializeSeq> {
+    fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple> {
         Ok(Compound::new(self))
-    }
-
-    #[inline]
-    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
-        self.serialize_seq_fixed_size(len)
     }
 
     #[inline]
@@ -218,13 +215,13 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
                               _name: &'static str,
                               len: usize)
                               -> Result<Self::SerializeTupleStruct> {
-        self.serialize_seq_fixed_size(len)
+        self.serialize_tuple(len)
     }
 
     #[inline]
     fn serialize_tuple_variant(self,
                                _name: &'static str,
-                               _variant_index: usize,
+                               _variant_index: u32,
                                _variant: &'static str,
                                _len: usize)
                                -> Result<Self::SerializeTupleVariant> {
@@ -238,13 +235,13 @@ impl<'a, W> ser::Serializer for &'a mut Serializer<W>
 
     #[inline]
     fn serialize_struct(self, _name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
-        self.serialize_seq_fixed_size(len)
+        self.serialize_tuple(len)
     }
 
     #[inline]
     fn serialize_struct_variant(self,
                                 _name: &'static str,
-                                _variant_index: usize,
+                                _variant_index: u32,
                                 _variant: &'static str,
                                 _len: usize)
                                 -> Result<Self::SerializeStructVariant> {
@@ -420,7 +417,8 @@ pub fn to_writer<W, T>(writer: &mut W, value: &T) -> Result<()>
 {
     let mut buffer = Vec::new();
     value.serialize(&mut Serializer::new(&mut buffer))?;
-    writer.write_u32::<LittleEndian>(buffer.len() as u32)
+    writer
+        .write_u32::<LittleEndian>(buffer.len() as u32)
         .and_then(|_| writer.write_all(&buffer))
         .map_err(|v| v.into())
 }
@@ -579,17 +577,17 @@ mod tests {
     fn writes_complex_struct() {
         let mut parts = Vec::new();
         parts.push(TestStructPart {
-            a: String::from("ABC"),
-            b: true,
-        });
+                       a: String::from("ABC"),
+                       b: true,
+                   });
         parts.push(TestStructPart {
-            a: String::from("1!!!!"),
-            b: true,
-        });
+                       a: String::from("1!!!!"),
+                       b: true,
+                   });
         parts.push(TestStructPart {
-            a: String::from("234b"),
-            b: false,
-        });
+                       a: String::from("234b"),
+                       b: false,
+                   });
         let v = TestStructBig {
             a: parts,
             b: String::from("EEe"),
