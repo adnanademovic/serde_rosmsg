@@ -8,7 +8,7 @@
 
 For more information you can look at:
 
-- [API Documentation](https://docs.rs/serde_rosmsg/0.1.0/serde_rosmsg/)
+- [API Documentation](https://docs.rs/serde_rosmsg/0.2.0/serde_rosmsg/)
 - [Release notes](https://github.com/adnanademovic/serde_rosmsg/releases)
 
 ## License
